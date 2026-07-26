@@ -185,7 +185,7 @@ def print_banner():
     width = 60
     for line in art.split("\n"):
         print(f"\x1b[38;2;180;0;0m{line.center(width)}\x1b[0m")
-    print(f"\x1b[38;2;120;120;120m{'made by unconsents#2167 | Version: 1.0.2 (release)':^{width}}\x1b[0m")
+    print(f"\x1b[38;2;120;120;120m{'made by unconsents#8744 | Version: 1.0.2 (release)':^{width}}\x1b[0m")
     print()
 
 class FluxerREST:
