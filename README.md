@@ -1,6 +1,6 @@
 # crime
-Crime Selfbot 
+Crime Selfbot is a selfbot made for Fluxer
 
-First Release 1.0.2
+Current Release 1.0.3
 
 Can't see configs/json? The code creates them on first launch.
