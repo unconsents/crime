@@ -32,13 +32,15 @@ class PresenceCog:
     def effective_status(self, p):
         if p.get("business_hours_enabled"):
             return self._business_status(p)
-        return p.get("status", "online")
+        return p.get("status")
 
     async def push_status(self, p, status_override=None):
         status = status_override or self.effective_status(p)
-        ok, body = await self.bot.rest.patch_user_settings({"status": status})
+        if not status:
+            return True
+        ok = await self.bot.send_presence_update(status=status)
         if not ok:
-            cprint(f"[crime] status update failed: {body}")
+            cprint("[crime] status update failed, see above for details.")
         return ok
 
     async def push_custom_status(self, p, text_override="__unset__"):
@@ -84,8 +86,9 @@ class PresenceCog:
         if cmd == "presence":
             enabled = "enabled" if pres.get("business_hours_enabled") else "disabled"
             rot = "enabled" if pres.get("rotating_enabled") else "disabled"
+            status_display = self.effective_status(pres) or "not set by crime (using your account's current status)"
             await self.bot.say(channel_id, make_embed("Presence", f"Usage: `{p}presence` — shows current settings", fields=[
-                {"name": "Status",          "value": self.effective_status(pres),       "inline": True},
+                {"name": "Status",          "value": status_display,                    "inline": True},
                 {"name": "Custom Status",   "value": pres.get("custom_status") or "none", "inline": True},
                 {"name": "Business Hours",  "value": enabled,                           "inline": True},
                 {"name": "Timezone",        "value": pres.get("timezone","UTC"),        "inline": True},
@@ -96,8 +99,14 @@ class PresenceCog:
         elif cmd == "status":
             if pres.get("business_hours_enabled"):
                 await self.bot.sad(channel_id, f"Business hours is on — status is set automatically.\nUse `{p}businesshours off` first."); return True
+            if args and args[0].lower() == "clear":
+                pres["status"] = None
+                save_presence(pres)
+                await self.bot.say(channel_id, make_embed("✅ Status", "crime will no longer override your status. Your account's current status is left as-is.", footer=f"Usage: {p}status <online|idle|dnd|invisible|clear>"))
+                return True
             if not args or args[0].lower() not in STATUS_CHOICES:
-                await self.bot.sad(channel_id, f"Usage: `{p}status <{'|'.join(sorted(STATUS_CHOICES))}>`\nCurrent: `{pres.get('status','online')}`"); return True
+                current = pres.get("status") or "not set by crime (using your account's current status)"
+                await self.bot.sad(channel_id, f"Usage: `{p}status <{'|'.join(sorted(STATUS_CHOICES))}|clear>`\nCurrent: `{current}`"); return True
             new = args[0].lower()
             ok = await self.push_status(pres, new)
             if ok:

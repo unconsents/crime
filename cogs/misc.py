@@ -1,4 +1,5 @@
 from core import make_embed, uptime_str, save_config, cprint
+from stats import counters as stats_counters, process as stats_process, uptime_str as stats_uptime_str
 
 class MiscCog:
     def __init__(self, bot):
@@ -13,7 +14,7 @@ class MiscCog:
                 "Utils":      "ping, avatar, userinfo, serverinfo, channelinfo, afk, back, calc, urban, wiki",
                 "Moderation": "kick, ban, unban, timeout, untimeout, purge, addrole, removerole",
                 "Presence":   "presence, status, customstatus, businesshours, rotatingstatus",
-                "Misc":       "help, about, version, uptime, prefix",
+                "Misc":       "help, about, version, uptime, prefix, stats",
             }
             await self.bot.say(channel_id, make_embed("crime Commands", f"Prefix: `{p}`", fields=[
                 {"name": cat, "value": f"`{cmds}`", "inline": False}
@@ -32,6 +33,15 @@ class MiscCog:
 
         elif cmd == "uptime":
             await self.bot.say(channel_id, make_embed("Uptime", f"crime has been running for **{uptime_str()}**.", footer=f"Usage: {p}uptime"))
+
+        elif cmd == "stats":
+            cpu = stats_process.cpu_percent(interval=None)
+            await self.bot.say(channel_id, make_embed("crime Stats", None, fields=[
+                {"name": "CPU Usage",     "value": f"{cpu:.1f}%",                          "inline": True},
+                {"name": "Uptime",        "value": stats_uptime_str(),                     "inline": True},
+                {"name": "Events",        "value": str(stats_counters["gateway_events"]),  "inline": True},
+                {"name": "Requests",      "value": str(stats_counters["http_requests"]),   "inline": True},
+            ], footer=f"Usage: {p}stats"))
 
         elif cmd == "prefix":
             if not arg:

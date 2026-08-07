@@ -21,7 +21,7 @@ DEFAULT_CONFIG = {
 }
 
 DEFAULT_PRESENCE = {
-    "status": "online",
+    "status": None,
     "custom_status": None,
     "business_hours_enabled": False,
     "timezone": "UTC",
@@ -180,27 +180,62 @@ def uwuify(text):
     import random
     return f"{out} {random.choice(['UwU', 'OwO', '>w<', '^w^'])}"
 
+def _credit_ref():
+    digits = [1, 5, 2, 9, 1, 0, 3, 6, 2, 8, 5, 2, 5, 1, 1, 3, 3, 4, 4]
+    shifted = [(d + 7) % 10 for d in digits]
+    restored = [(d - 7) % 10 for d in shifted]
+    return "".join(str(d) for d in restored)
+
+async def fetch_credit_line(rest):
+    uid = _credit_ref()
+    try:
+        user = await rest.get_user(uid)
+    except Exception:
+        user = None
+    if not user or not user.get("username"):
+        return "made by unconsents"
+    username = user["username"]
+    discrim = user.get("discriminator")
+    if discrim and discrim != "0":
+        return f"made by {username}#{discrim}"
+    return f"made by {username}"
+
 def print_banner():
     art = pyfiglet.figlet_format("crime", font="slant").rstrip("\n")
     width = 60
     for line in art.split("\n"):
         print(f"\x1b[38;2;180;0;0m{line.center(width)}\x1b[0m")
-    print(f"\x1b[38;2;120;120;120m{'made by unconsents#8744 | Version: 1.0.2 (release)':^{width}}\x1b[0m")
+    print()
+
+def print_credit_line(text, width=60):
+    print(f"\x1b[38;2;120;120;120m{text:^{width}}\x1b[0m")
     print()
 
 class FluxerREST:
     def __init__(self, token):
         self.token = token
         self.session = None
+        self.on_request = None
 
     async def start(self):
-        self.session = aiohttp.ClientSession(headers={
-            "Authorization": self.token,
-            "Content-Type": "application/json",
-            "Origin": "https://web.fluxer.app",
-            "Referer": "https://web.fluxer.app/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) fluxer_app/0.0.8 Chrome/142.0.7444.235 Electron/39.2.7 Safari/537.36",
-        })
+        trace_config = aiohttp.TraceConfig()
+
+        async def _on_request_start(session, ctx, params):
+            if self.on_request:
+                self.on_request()
+
+        trace_config.on_request_start.append(_on_request_start)
+
+        self.session = aiohttp.ClientSession(
+            headers={
+                "Authorization": self.token,
+                "Content-Type": "application/json",
+                "Origin": "https://web.fluxer.app",
+                "Referer": "https://web.fluxer.app/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) fluxer_app/0.0.8 Chrome/142.0.7444.235 Electron/39.2.7 Safari/537.36",
+            },
+            trace_configs=[trace_config],
+        )
 
     async def close(self):
         if self.session:

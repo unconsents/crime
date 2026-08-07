@@ -1,19 +1,25 @@
-import asyncio
-import json
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from bootstrap import ensure_packages
+ensure_packages()
+
+import asyncio
+import json
+
 from core import (
     load_config, load_presence, save_presence, make_embed,
     FluxerREST, cprint, print_banner, COOLDOWNS_DEF,
     AUTO_DELETE_SECONDS, AFK_REPLY_MIN_INTERVAL_SECONDS,
-    GATEWAY_WS_URL,
+    GATEWAY_WS_URL, fetch_credit_line, print_credit_line,
 )
 
 import time
 import websockets
+
+from stats import bump_event, bump_request, title_update_loop, uptime_str as stats_uptime_str
 
 from cogs.fun import FunCog
 from cogs.utils import UtilsCog
@@ -26,6 +32,8 @@ class CrimeBot:
         self.config = load_config()
         self.presence = load_presence()
         self.rest = FluxerREST(self.config["token"])
+        self.rest.on_request = bump_request
+        self.ws = None
         self.state = {
             "user_id": None,
             "username": None,
@@ -73,6 +81,22 @@ class CrimeBot:
 
     async def sad(self, channel_id, description):
         await self.say(channel_id, make_embed("❌ Error", description), fallback=f"X {description}")
+
+    async def send_presence_update(self, status=None, custom_status_text="__unset__"):
+        if self.ws is None:
+            cprint("[crime] cannot update presence: not connected to gateway yet.")
+            return False
+        d = {"since": None, "afk": False}
+        if status is not None:
+            d["status"] = status
+        if custom_status_text != "__unset__":
+            d["custom_status"] = {"text": custom_status_text} if custom_status_text else None
+        try:
+            await self.ws.send(json.dumps({"op": 3, "d": d}))
+            return True
+        except Exception as e:
+            cprint(f"[crime] failed to send presence update: {type(e).__name__}: {e}")
+            return False
 
     async def handle_command(self, cmd, args, channel_id, message_id, guild_id, author):
         if author.get("id") != self.state["user_id"]:
@@ -145,18 +169,24 @@ class CrimeBot:
     async def run_gateway(self):
         ws_url = f"{GATEWAY_WS_URL}?v=1&encoding=json"
         async with websockets.connect(ws_url) as ws:
+            self.ws = ws
             hello = json.loads(await ws.recv())
             interval_ms = hello["d"]["heartbeat_interval"]
             heartbeat_task = asyncio.create_task(self.heartbeat_loop(ws, interval_ms))
-            await ws.send(json.dumps({
-                "op": 2,
-                "d": {
-                    "token": self.config["token"],
-                    "properties": {"os": "windows", "browser": "crime", "device": "crime"},
-                    "intents": 0,
-                    "presence": {"status": "online", "afk": False},
-                },
-            }))
+            identify_data = {
+                "token": self.config["token"],
+                "properties": {"os": "windows", "browser": "crime", "device": "crime"},
+                "intents": 0,
+            }
+            explicit_status = self.cogs["presence"].effective_status(self.presence)
+            presence_block = {"afk": False}
+            if explicit_status:
+                presence_block["status"] = explicit_status
+            if self.presence.get("custom_status"):
+                presence_block["custom_status"] = {"text": self.presence["custom_status"]}
+            if len(presence_block) > 1:
+                identify_data["presence"] = presence_block
+            await ws.send(json.dumps({"op": 2, "d": identify_data}))
             try:
                 async for raw in ws:
                     payload    = json.loads(raw)
@@ -164,6 +194,7 @@ class CrimeBot:
                     seq        = payload.get("s")
                     event_type = payload.get("t")
                     data       = payload.get("d")
+                    bump_event()
                     if seq is not None:
                         self.state["sequence"] = seq
                     if op == 0:
@@ -172,13 +203,13 @@ class CrimeBot:
                             self.state["username"]  = data["user"]["username"]
                             self.state["session_id"] = data.get("session_id")
                             cprint(f"[crime] logged in as {self.state['username']}")
-                            await self.cogs["presence"].push_status(self.presence)
                             self.cogs["presence"].restart_rotating(self.presence)
                             asyncio.create_task(self._business_loop())
                         elif event_type == "MESSAGE_CREATE":
                             asyncio.create_task(self.handle_message(data))
             finally:
                 heartbeat_task.cancel()
+                self.ws = None
 
     async def _business_loop(self):
         await self.cogs["presence"].business_hours_loop(self.presence)
@@ -186,6 +217,9 @@ class CrimeBot:
     async def start(self):
         print_banner()
         await self.rest.start()
+        credit_line = await fetch_credit_line(self.rest)
+        print_credit_line(credit_line)
+        asyncio.create_task(title_update_loop(lambda: self.state["username"]))
         try:
             while True:
                 try:
